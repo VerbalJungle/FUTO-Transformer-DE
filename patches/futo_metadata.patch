@@ -1,0 +1,18 @@
+--- a/gguf-py/gguf/conversion/base.py
++++ b/gguf-py/gguf/conversion/base.py
+@@ -101,2 +101,15 @@
+     def prepare(self) -> None:
++        # --- FUTO KEYBOARD METADATA & TOKENIZER ---
++        self.gguf_writer.add_string("general.name", "German v1")
++        self.gguf_writer.add_string("keyboardlm.languages", "de")
++        self.gguf_writer.add_uint32("keyboardlm.finetuning_count", 0)
++        self.gguf_writer.add_string("keyboardlm.history", "German model created")
++        self.gguf_writer.add_string("keyboardlm.features", "base_v1 inverted_space")
++        self.gguf_writer.add_string("keyboardlm.ext_tokenizer_type", "sentencepiece")
++
++        spm_path = self.dir_model / "tokenizer.model"
++        if spm_path.exists():
++            with open(spm_path, "rb") as _spm_f:
++                self.gguf_writer.add_array("keyboardlm.ext_tokenizer_data", list(_spm_f.read()))
++        # ------------------------------------------
+         self.set_vocab()

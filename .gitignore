@@ -1,0 +1,28 @@
+# Python & Bytecode
+__pycache__/
+*.py[cod]
+venv/
+.venv/
+env/
+.env
+
+# GGUF & Modell-Dumps
+*.gguf
+*.bin
+*.safetensors
+futo_de_final/
+futo_de_checkpoints/
+
+# Große Korpus-Dateien
+corpus_*.txt
+*.raw
+
+# Externe Tools & Builds
+llama.cpp/
+build/
+dist/
+
+# IDEs & Editoren
+.idea/
+.vscode/
+*.sublime-project
