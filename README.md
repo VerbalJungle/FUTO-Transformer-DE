@@ -15,14 +15,10 @@ Ein ultrakompaktes deutsches Sprachmodell (~33M Parameter, LLaMA-Architektur) f�
 ## Nutzung
 
 **In-App:** 
--> Öffne die "FUTO-Keyboard"-App (oder installiere sie falls noch nicht geschehen) 
--> Gehe auf "Textvorhersage" und dann auf "Transformer-Modelle"
--> Wähle "Import from file" und wähle die .gguf-Datei aus
--> Wähle abschließend Deutsch als Sprache für das Model aus (falls Deutsch in der Auswahl nicht auftaucht musst du es unter "Sprachen und Modelle" hinzufügen, hier kannst du auch das Model unter "Transformer-Model" hinzufügen)
+-> Öffne die "FUTO-Keyboard"-App (oder installiere sie falls noch nicht geschehen)<br>-> Gehe auf "Textvorhersage" und dann auf "Transformer-Modelle"<br>-> Wähle "Import from file" und wähle die .gguf-Datei aus<br>-> Wähle abschließend Deutsch als Sprache für das Model aus (falls Deutsch in der Auswahl nicht auftaucht musst du es unter "Sprachen und Modelle" hinzufügen, hier kannst du auch das Model unter "Transformer-Model" hinzufügen)
 
 ## Baue das Transformer-Model selbst
-
---- Ausstehend
+- unter experimental
 
 ---
 
@@ -32,13 +28,15 @@ Ein ultrakompaktes deutsches Sprachmodell (~33M Parameter, LLaMA-Architektur) f�
 futo-keyboard-german/
 ├── README.md
 ├── requirements.txt
+├── DataSet/
+│   └── (corpus_de_expert.txt) # Korpus - Huggingface 
 ├── tokenizer/
 │   ├── futo_de_15k.model      # SentencePiece Tokenizer
 │   └── futo_de_15k.vocab
 ├── scripts/
-│   ├── 01_build_corpus.py     # Datensatzbereinigung & Augmentation
-│   ├── 02_train_model.py      # PyTorch LLaMA-Training
-│   ├── 03_build_futo_gguf.py  # llama.cpp GGUF Export & Quantisierung
-│   └── 04_benchmark.py        # Top-K Logit-Evaluierung
+│   ├── build_corpus.py     # Datensatzbereinigung & Augmentation
+│   ├── train_tokenizer.py  # Tokenizer bauen
+│   ├── train_model.py      # PyTorch LLaMA-Training
+│   └── build_futo_gguf.py  # llama.cpp GGUF Export & Quantisierung
 └── patches/
     └── futo_metadata.patch    # llama.cpp FUTO-Header Patch
