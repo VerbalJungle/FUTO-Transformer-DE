@@ -12,7 +12,7 @@ print(f"Lade '{MODEL_PATH}' für den Stresstest...")
 llm = Llama(
     model_path=MODEL_PATH,
     n_ctx=128,
-    n_threads=4,  # Simuliert typische CPU-Kerne eines Smartphones
+    n_threads=4,
     verbose=False
 )
 

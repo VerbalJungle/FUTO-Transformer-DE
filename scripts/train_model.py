@@ -1,12 +1,11 @@
 import os
-# ZWINGEND ganz oben VOR "import torch" setzen:
 os.environ["HSA_OVERRIDE_GFX_VERSION"] = "11.0.0"
 os.environ["HIP_VISIBLE_DEVICES"] = "0"
 os.environ["ROCR_VISIBLE_DEVICES"] = "0"
 
-DATASET_ID = "VerbalJungle/German-KeyboardLM-Corpus"  # Dein HuggingFace Dataset Identifier
-SPM_PATH = "tokenizer/futo_de_15k.model"
-LOCAL_FALLBACK_FILE = "corpus_de_expert.txt"
+DATASET_ID = "VerbalJungle/German-KeyboardLM-Corpus"  #HuggingFace Dataset Identifier
+SPM_PATH = "tokenizer/futo_de_15k_1.model"
+LOCAL_FALLBACK_FILE = "corpus_de_expert1.txt"
 MAX_LENGTH = 256
 
 import torch
@@ -28,9 +27,9 @@ SPM_PATH = "../tokenizer/futo_de_15k.model"
 sp = spm.SentencePieceProcessor()
 sp.load(SPM_PATH)
 
-print("Lese und tokenisiere 'corpus_de_expert.txt'...")
+print("Lese und tokenisiere 'corpus_de_expert1.txt'...")
 input_ids_list = []
-with open("../DataSet/corpus_de_expert.txt", "r", encoding="utf-8") as f:
+with open("../DataSet/corpus_de_expert1.txt", "r", encoding="utf-8") as f:
     for line in f:
         text = line.strip()
         if text:
@@ -72,19 +71,19 @@ def collate_fn(batch):
         "labels": torch.tensor(labels, dtype=torch.long)
     }
 
-# 4. Optimierte Trainingsparameter für RX 7900 XT (20 GB VRAM)
+# 4. Optimierte Trainingsparameter für RX 7900 XT
 training_args = TrainingArguments(
     output_dir="./futo_de_checkpoints",
     num_train_epochs=1,
-    per_device_train_batch_size=256,      # Batch-Size 128 nutzt die GPU voll aus
-    gradient_accumulation_steps=1,        # Effektive Batch-Size: 256
+    per_device_train_batch_size=256,
+    gradient_accumulation_steps=1,
     learning_rate=1e-3,
     warmup_steps=1000,
     weight_decay=0.01,
     logging_steps=100,
     save_strategy="no",
-    fp16=True,                           # Nutzt AMD HIP FP16 Matrix-Kerne
-    dataloader_num_workers=6,             # Parallelisiert das Laden von der SSD
+    fp16=True,
+    dataloader_num_workers=6,
     dataloader_pin_memory=True,
     report_to="none"
 )

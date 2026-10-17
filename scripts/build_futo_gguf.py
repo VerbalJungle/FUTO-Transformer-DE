@@ -7,7 +7,7 @@ from pathlib import Path
 # --- Pfad-Konfiguration ---
 ROOT_DIR = Path(__file__).resolve().parent.parent
 MODEL_DIR = ROOT_DIR / "futo_de_final"
-TOKENIZER_SRC = ROOT_DIR / "tokenizer" / "futo_de_15k.model"
+TOKENIZER_SRC = ROOT_DIR / "tokenizer" / "futo_de_15k_1.model"
 LLAMA_DIR = ROOT_DIR / "llama.cpp"
 
 OUT_F16_GGUF = ROOT_DIR / "futo_de_33m_f16.gguf"
@@ -74,7 +74,7 @@ futo_payload = (
     '        _spm = pathlib.Path(getattr(self, "dir_model", ".")) / "tokenizer.model"\n'
     '        if _spm.exists():\n'
     '            with open(_spm, "rb") as _f:\n'
-    '                self.gguf_writer.add_array("keyboardlm.ext_tokenizer_data", list(_f.read()))\n'
+    '                self.gguf_writer.add_array("keyboardlm.ext_tokenizer_data", _f.read())'
     '        # ------------------------------------------\n'
 )
 

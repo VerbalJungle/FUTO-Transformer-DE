@@ -13,11 +13,11 @@ env/
 futo_de_final/
 futo_de_checkpoints/
 
-# Große Korpus-Dateien
+# Korpus-Dateien
 corpus_*.txt
 *.raw
 
-# Externe Tools & Builds
+# Tools & Builds
 llama.cpp/
 build/
 dist/
