@@ -1,7 +1,8 @@
 --- a/gguf-py/gguf/conversion/base.py
 +++ b/gguf-py/gguf/conversion/base.py
-@@ -101,2 +101,15 @@
+@@ -101,2 +101,18 @@
      def prepare(self) -> None:
++        import numpy as np
 +        # --- FUTO KEYBOARD METADATA & TOKENIZER ---
 +        self.gguf_writer.add_string("general.name", "German v1")
 +        self.gguf_writer.add_string("keyboardlm.languages", "de")
@@ -11,8 +12,10 @@
 +        self.gguf_writer.add_string("keyboardlm.ext_tokenizer_type", "sentencepiece")
 +
 +        spm_path = self.dir_model / "tokenizer.model"
-+        if spm_path.exists():
-+            with open(spm_path, "rb") as _spm_f:
-+                self.gguf_writer.add_array("keyboardlm.ext_tokenizer_data", list(_spm_f.read()))
++        if not spm_path.exists():
++            raise FileNotFoundError(f"FUTO benötigt tokenizer.model unter {spm_path}!")
++        with open(spm_path, "rb") as _spm_f:
++            spm_bytes = np.frombuffer(_spm_f.read(), dtype=np.uint8)
++            self.gguf_writer.add_array("keyboardlm.ext_tokenizer_data", spm_bytes)
 +        # ------------------------------------------
          self.set_vocab()

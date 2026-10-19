@@ -4,8 +4,8 @@ os.environ["HIP_VISIBLE_DEVICES"] = "0"
 os.environ["ROCR_VISIBLE_DEVICES"] = "0"
 
 DATASET_ID = "VerbalJungle/German-KeyboardLM-Corpus"  #HuggingFace Dataset Identifier
-SPM_PATH = "tokenizer/futo_de_15k_1.model"
-LOCAL_FALLBACK_FILE = "corpus_de_expert1.txt"
+SPM_PATH = "tokenizer/futo_de_15k.model"
+LOCAL_FALLBACK_FILE = "corpus_de_expert.txt"
 MAX_LENGTH = 256
 
 import torch
@@ -29,11 +29,11 @@ sp.load(SPM_PATH)
 
 print("Lese und tokenisiere 'corpus_de_expert1.txt'...")
 input_ids_list = []
-with open("../DataSet/corpus_de_expert1.txt", "r", encoding="utf-8") as f:
+with open("../DataSet/corpus_de_expert.txt", "r", encoding="utf-8") as f:
     for line in f:
         text = line.strip()
         if text:
-            # 2 = BOS, 3 = EOS
+            # 2 = BOS, 3 = EOSimport gguf
             ids = [2] + sp.encode_as_ids(text) + [3]
             # Begrenzung auf Kontextlänge
             if len(ids) <= 128:
@@ -49,7 +49,7 @@ config = LlamaConfig(
     intermediate_size=1376,
     num_hidden_layers=8,
     num_attention_heads=8,
-    max_position_embeddings=128,
+    max_position_embeddings=2048,
     bos_token_id=2,
     eos_token_id=3,
     pad_token_id=0,
@@ -71,7 +71,7 @@ def collate_fn(batch):
         "labels": torch.tensor(labels, dtype=torch.long)
     }
 
-# 4. Optimierte Trainingsparameter für RX 7900 XT
+# 4. Trainingsparameter für RX 7900 XT
 training_args = TrainingArguments(
     output_dir="./futo_de_checkpoints",
     num_train_epochs=1,

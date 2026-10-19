@@ -4,9 +4,10 @@ import json
 import re
 import random
 import xml.etree.ElementTree as ET
+import config
 from datasets import load_dataset
 
-OUTPUT_FILE = "corpus_de_expert1.txt"
+OUTPUT_FILE = config.KORPUS_NAME
 all_sentences = set()  # verhindert Duplikate
 
 # QWERTZ-Tastatur-Nachbartasten
@@ -176,7 +177,7 @@ for file in reddit_posts_files:
 print(f'  -> {count:,} Sätze aus FragReddit Posts extrahiert.')
 
 # 5 Finale Mischung für Next-Word Vorhersage
-print("\n=== 5. Generiere finale Mischung ===")
+print("\n=== 5. Generiere finalen Korpus ===")
 augmented_list = list(all_sentences)
 random.seed(42)
 random.shuffle(augmented_list)

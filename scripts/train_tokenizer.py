@@ -1,4 +1,5 @@
 import sentencepiece as spm
+import config
 
 VOCAB_SIZE = 15008  # FUTO-Standardgröße (unter 15 MB Speicher)
 CORPUS_FILE = "../DataSet/corpus_de_expert1.txt" # Verwendeter Korpus 

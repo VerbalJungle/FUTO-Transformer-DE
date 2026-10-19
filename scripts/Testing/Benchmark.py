@@ -6,7 +6,7 @@ sys.path.append(str(Path(__file__).resolve().parent.parent))
 
 from llama_cpp import Llama
 
-MODEL_PATH = "futo_de_33m_futo.gguf"
+MODEL_PATH = "../../Models/GermanV1-0_9_1-unquantized.gguf"
 
 print(f"Lade '{MODEL_PATH}' für den Stresstest...")
 llm = Llama(
