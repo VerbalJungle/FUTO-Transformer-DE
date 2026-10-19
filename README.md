@@ -8,9 +8,9 @@ Ein ultrakompaktes deutsches Sprachmodell (~33M Parameter, LLaMA-Architektur) f�
 
 - **Ultrakompakt:** ~33 Millionen Parameter – optimiert für extrem geringen Akku- und RAM-Verbrauch auf Smartphones.
 - **FUTO-kompatibler Tokenizer:** 15.000 Token Custom-SentencePiece-Vokabular mit `treat_whitespace_as_suffix`-Unterstützung.
-- **Q8_0 GGUF-Export:** ~35 MB Dateigröße bei INT8 Quantisierung mit nahezu voller FP16 Vorhersagequalität.
+- **Q8_0, Q5km oder Q4km GGUF-Export:** ~35-70 MB RAM_bedarf bei INT8 Quantisierung mit nahezu voller FP16 Vorhersagequalität.
 - **Vollständig Offline & Privat:** Sämtliche Inferenz läuft zu 100 % lokal auf dem Gerät.
-- **Hardwarebeschleunigte Pipeline:** Schnelles Training auf PyTorch mit AMD ROCm oder NVIDIA CUDA.
+- **Hardwarebeschleunigte Pipeline:** Schnelles Training auf PyTorch mit AMD ROCm.
 - **[Korpus](https://huggingface.co/datasets/VerbalJungle/German-KeyboardLM-Corpus/tree/main)**
 
 ## Nutzung
