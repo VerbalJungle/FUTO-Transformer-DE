@@ -22,9 +22,10 @@ Ein ultrakompaktes deutsches Sprachmodell (~33M Parameter, LLaMA-Architektur) f�
 - Baue einen eigenen Korpus (build_corpus.py) oder nutze einen der Vorhandenen
   - Trainingsmaterial muss individuell extrahiert, gefiltert und dem set "all_sentences" hinzugef체gt werden
 - Trainiere den Tokenizer mit deinem verwendeten Korpus(train_tokenizer.py)
+- Korpus ist auch auf Huggingface [verf체gbar](https://huggingface.co/datasets/VerbalJungle/German-KeyboardLM-Corpus) 
 - Trainiere das Modell (train_model.py) ! Achte auf deine ROCm Konfiguration, CUDA wurde nicht getestet
 - Exportiere es als GGUF und f체ge die Metadaten f체r das FUTO Keyboard ein(build_gguf_pure.py)
-- Quantisiere das Modell, bei Bedarf, entsprechend deiner Bed체rfnisse(quantize_model.py) 
+- Quantisiere das Modell, bei Bedarf, entsprechend deiner Bed체rfnisse(quantize_model.py)
 
 ---
 
