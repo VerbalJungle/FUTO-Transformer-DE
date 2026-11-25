@@ -36,7 +36,7 @@ Für normale Nutzer empfiehlt sich **`German-v1-q5km.gguf`**. Wer genügend Spei
 ## Baue das Transformer-Modell selbst
 
 Nahezu alle Pfade, Architektur- und Metadaten-Parameter lassen sich zentral in `config.py` anpassen.  
-Ein Basis-Korpus ist außerdem auf HuggingFace [verfügbar](https://huggingface.co/datasets/VerbalJungle/German-KeyboardLM-Corpus).
+Die Rohdaten für Reddit(r/fragReddit) sind unter Artic Shift im jsonl-Format verfügbar, für Wikipedia bieten sich die 1M-Sentence Datensätze vom Leipzig Corpora Collection an
 
 ### 1. Umgebung einrichten
 ```bash
