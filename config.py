@@ -16,12 +16,12 @@ LLAMA_DIR = BASE_DIR / "llama.cpp"
 ORIGINALMODEL = BASE_DIR / "Models" / "ml4_q6_k.gguf"  # bitte entsprechend des Speicherortes anpassen
 
 # GGUF Output-Namen
-RAW_GGUF_NAME = "German-0_9_1-unquantized.gguf"
+RAW_GGUF_NAME = "German-v1-unquantized.gguf"
 OUTPUT_GGUF_PATH = BASE_DIR / "Models" / RAW_GGUF_NAME
 
 # --- MODELL-METADATEN & ARCHITEKTUR  ---
-MODEL_NAME = "Futo_De_0_9_1"
-SIZE_LABEL = "33M"
+MODEL_NAME = "Futo_De_1"
+SIZE_LABEL = "40M"
 TYPE = "model"
 LANGUAGE = "de"
 AUTHOR = "VerbalJungle"
@@ -60,7 +60,7 @@ FUTO_TOKENIZER_TYPE = "sentencepiece"
 
 # --- QUANTISIERUNG ---
 QUANT_LEVELS = {
-    "1": ("Q4_K_M", "transformer_de_DE_q4km.gguf"),
-    "2": ("Q5_K_M", "transformer_de_DE_q5km.gguf"),
-    "3": ("Q8_0",   "transformer_de_DE_q80.gguf"),
+    "1": ("Q4_K_M", "German-v1-q4km.gguf"),
+    "2": ("Q5_K_M", "German-v1-q5km.gguf"),
+    "3": ("Q8_0",   "German-v1-q80.gguf"),
 }

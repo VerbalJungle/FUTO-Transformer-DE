@@ -99,5 +99,5 @@ futo-keyboard-german/
 │       └── compare_to_original.py
 ├── Models/                       # Exportierte & quantisierte GGUF-Modelle
 └── patches/
-    └── futo_metadata.patch       # Historischer llama.cpp FUTO-Header-Patch
+    └── futo_metadata.patch       # Veralteter llama.cpp FUTO-Header-Patch
 ```
