@@ -38,7 +38,7 @@ ROPE_DIMENSION_COUNT = 64
 # --- FUTO SPEZIFISCH KEYBOARDLM ---
 FINETUNING_COUNT = 0
 HISTROY = "German custom prediction model for FUTO keyboard"
-FUTO_FEATURES = "base_v1 inverted_space xbu_char_autocorrect_v1 xc0_swipe_typing_v1 char_embedding_mixing_v1"
+FUTO_FEATURES = "base_v1 inverted_space xbu_char_autocorrect_v1 xc0_swipe_typing_v1 char_embed_mixing_v1"
 FUTO_TOKENIZER_TYPE = "sentencepiece"
 
 # --- QUANTISIERUNG ---
