@@ -13,8 +13,11 @@ env/
 *.zip
 futo_de_final/
 futo_de_checkpoints/
+futo_de_final_checkpoints/
+futo_de_cache/
 
 # Korpus-Dateien
+DataSet/
 corpus_*.txt
 *.raw
 

@@ -7,14 +7,18 @@ Three things are required beyond the keyboardlm.* metadata:
   3. tokenizer.ggml.* keys (llama.cpp refuses to load a model without a vocabulary).
      FUTO still tokenizes with the embedded SentencePiece proto.
 """
+import argparse
+import sys
+from pathlib import Path
+
 import numpy as np
 import sentencepiece as spm
 from safetensors import safe_open
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
 import config
 import gguf
-
-QK_SUFFIXES = ("attn_q.weight", "attn_k.weight")
 
 
 def permute_rows_for_rope(weight: np.ndarray, n_head: int) -> np.ndarray:
@@ -43,8 +47,10 @@ def to_gguf_tensors(tensors: dict[str, np.ndarray]) -> dict[str, np.ndarray]:
         gguf_name = name_map.get_name(hf_name, try_suffixes=(".weight", ".bias"))
         if gguf_name is None:
             raise KeyError(f"Kein GGUF-Name fuer Tensor {hf_name}")
-        if gguf_name.endswith(QK_SUFFIXES):
+        if gguf_name.endswith("attn_q.weight"):
             weight = permute_rows_for_rope(weight, config.HEAD_COUNT)
+        elif gguf_name.endswith("attn_k.weight"):
+            weight = permute_rows_for_rope(weight, config.HEAD_COUNT_KV)
         converted[gguf_name] = weight
     if "output.weight" not in converted:
         # Tied embeddings: FUTO's vendored llama.cpp has no fallback and requires output.weight
@@ -52,7 +58,7 @@ def to_gguf_tensors(tensors: dict[str, np.ndarray]) -> dict[str, np.ndarray]:
     return converted
 
 
-def write_model_metadata(writer: gguf.GGUFWriter) -> None:
+def write_model_metadata(writer: gguf.GGUFWriter, vocab_size: int) -> None:
     writer.add_string("general.name", config.MODEL_NAME)
     writer.add_string("general.type", config.TYPE)
     writer.add_string("general.size_label", config.SIZE_LABEL)
@@ -70,7 +76,7 @@ def write_model_metadata(writer: gguf.GGUFWriter) -> None:
     writer.add_value_length(config.VALUE_LENGTH)
     writer.add_rope_dimension_count(config.ROPE_DIMENSION_COUNT)
     writer.add_rope_freq_base(10000.0)
-    writer.add_vocab_size(config.VOCAB_SIZE)
+    writer.add_vocab_size(vocab_size)
 
 
 def write_futo_metadata(writer: gguf.GGUFWriter, spm_bytes: bytes) -> None:
@@ -83,11 +89,38 @@ def write_futo_metadata(writer: gguf.GGUFWriter, spm_bytes: bytes) -> None:
     writer.add_array("keyboardlm.ext_tokenizer_data", spm_bytes)
 
 
-def write_llama_vocab(writer: gguf.GGUFWriter, sp: spm.SentencePieceProcessor) -> None:
-    if sp.vocab_size() != config.VOCAB_SIZE:
+def validate_futo_tokenizer(
+    sp: spm.SentencePieceProcessor, expected_vocab_size: int | None = config.VOCAB_SIZE
+) -> None:
+    if expected_vocab_size is not None and sp.vocab_size() != expected_vocab_size:
         raise ValueError(
-            f"Tokenizer hat {sp.vocab_size()} Pieces, config.VOCAB_SIZE ist {config.VOCAB_SIZE}"
+            f"Tokenizer hat {sp.vocab_size()} Pieces, erwartet wurde {expected_vocab_size}"
         )
+    features = set(config.FUTO_FEATURES.split())
+    if "xbu_char_autocorrect_v1" in features:
+        if sp.unk_id() != config.UNK_TOKEN_ID or sp.bos_id() != config.BOS_TOKEN_ID:
+            raise ValueError(
+                f"FUTO xbu_char_autocorrect_v1 erfordert unk_id={config.UNK_TOKEN_ID} und "
+                f"bos_id={config.BOS_TOKEN_ID} (ist: unk={sp.unk_id()}, bos={sp.bos_id()})"
+            )
+        unk = sp.unk_id()
+        for tok in ("<XBU>", "<XBC>", "<XEC>"):
+            if sp.piece_to_id(tok) == unk:
+                raise ValueError(f"FUTO Special Token {tok} fehlt im Tokenizer")
+        char_a_id = sp.piece_to_id("<CHAR_A>")
+        if char_a_id == unk:
+            raise ValueError("FUTO Special Token <CHAR_A> fehlt im Tokenizer")
+        for i in range(26):
+            expected_tok = f"<CHAR_{chr(ord('A') + i)}>"
+            actual_id = sp.piece_to_id(expected_tok)
+            if actual_id != char_a_id + i:
+                raise ValueError(
+                    f"FUTO <CHAR_A>..<CHAR_Z> nicht lückenlos: {expected_tok}={actual_id}, "
+                    f"erwartet {char_a_id + i}"
+                )
+
+
+def write_llama_vocab(writer: gguf.GGUFWriter, sp: spm.SentencePieceProcessor) -> None:
     pieces = range(sp.vocab_size())
     writer.add_tokenizer_model("llama")
     writer.add_token_list([sp.id_to_piece(i).encode("utf-8") for i in pieces])
@@ -104,27 +137,38 @@ def _token_type(sp: spm.SentencePieceProcessor, token_id: int) -> int:
         return gguf.TokenType.UNKNOWN
     if sp.is_control(token_id):
         return gguf.TokenType.CONTROL
+    if sp.is_unused(token_id):
+        return gguf.TokenType.UNUSED
     if sp.is_byte(token_id):
         return gguf.TokenType.BYTE
     return gguf.TokenType.NORMAL
 
 
-def resolve_tokenizer_path():
+def resolve_tokenizer_path() -> Path:
     path = config.TOKENIZER_PATH
     return path if path.exists() else config.FALLBACK_TOKENIZER_PATH
 
 
-def convert_to_futo_gguf() -> None:
+def convert_to_futo_gguf(
+    safetensors_path: Path = config.SAFETENSOR_PATH,
+    tokenizer_path: Path | None = None,
+    output_path: Path = config.OUTPUT_GGUF_PATH,
+    allow_custom_vocab: bool = False,
+) -> None:
     print(">>> Starte direkten FUTO-GGUF-Export <<<")
-    tensors = to_gguf_tensors(load_tensors(config.SAFETENSOR_PATH))
+    tensors = to_gguf_tensors(load_tensors(safetensors_path))
     print(f"Geladene Tensors: {len(tensors)}")
 
-    tokenizer_path = resolve_tokenizer_path()
-    spm_bytes = tokenizer_path.read_bytes()
+    tok_path = tokenizer_path if tokenizer_path is not None else resolve_tokenizer_path()
+    spm_bytes = tok_path.read_bytes()
     sp = spm.SentencePieceProcessor(model_proto=spm_bytes)
+    validate_futo_tokenizer(
+        sp, expected_vocab_size=None if allow_custom_vocab else config.VOCAB_SIZE
+    )
 
-    writer = gguf.GGUFWriter(config.RAW_GGUF_NAME, arch="llama")
-    write_model_metadata(writer)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    writer = gguf.GGUFWriter(str(output_path), arch="llama")
+    write_model_metadata(writer, vocab_size=sp.vocab_size())
     write_futo_metadata(writer, spm_bytes)
     write_llama_vocab(writer, sp)
 
@@ -135,8 +179,23 @@ def convert_to_futo_gguf() -> None:
     writer.write_kv_data_to_file()
     writer.write_tensors_to_file()
     writer.close()
-    print(f">>> FERTIG: {config.RAW_GGUF_NAME} <<<")
+    print(f">>> FERTIG: {output_path} <<<")
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Exportiert Safetensors als FUTO-GGUF.")
+    parser.add_argument("--safetensors", type=Path, default=config.SAFETENSOR_PATH)
+    parser.add_argument("--tokenizer", type=Path, default=None)
+    parser.add_argument("--output", type=Path, default=config.OUTPUT_GGUF_PATH)
+    parser.add_argument("--allow-custom-vocab", action="store_true")
+    args = parser.parse_args()
+    convert_to_futo_gguf(
+        safetensors_path=args.safetensors,
+        tokenizer_path=args.tokenizer,
+        output_path=args.output,
+        allow_custom_vocab=args.allow_custom_vocab,
+    )
 
 
 if __name__ == "__main__":
-    convert_to_futo_gguf()
+    main()

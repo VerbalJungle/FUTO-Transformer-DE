@@ -1,8 +1,11 @@
 import os
-import pathlib
 import shutil
 import subprocess
 import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
 import config
 
 def check_dependencies():
@@ -18,18 +21,17 @@ def find_or_build_llama_quantize() -> str:
     """Finde ein existierendes llama-quantize oder baue es automatisch."""
     # 1. Bekannte lokale Pfade oder PATH prüfen
     candidates = [
-        "./llama.cpp/build/bin/llama-quantize",
-        "./llama.cpp/build/bin/quantize",
-        "./llama.cpp/llama-quantize",
-        "./llama.cpp/quantize",
-        "llama-quantize",
-        "quantize"
+        config.LLAMA_DIR / "build" / "bin" / "llama-quantize",
+        config.LLAMA_DIR / "build" / "bin" / "quantize",
+        config.LLAMA_DIR / "llama-quantize",
+        config.LLAMA_DIR / "quantize",
     ]
     for c in candidates:
-        if os.path.isfile(c) and os.access(c, os.X_OK):
-            return os.path.abspath(c)
-        if shutil.which(c):
-            return shutil.which(c)
+        if c.is_file() and os.access(c, os.X_OK):
+            return str(c.resolve())
+    for name in ("llama-quantize", "quantize"):
+        if found := shutil.which(name):
+            return found
 
     print(">>> 'llama-quantize' nicht gefunden. Starte Neubau von llama... <<<")
     check_dependencies()
@@ -74,7 +76,7 @@ def find_or_build_llama_quantize() -> str:
 
 def main():
     input_file = config.OUTPUT_GGUF_PATH
-    if not os.path.exists(input_file):
+    if not input_file.exists():
         raise SystemExit(
             f"Fehler: Ausgangsmodell {input_file} nicht gefunden. "
             "Bitte erstelle zuerst die Basis-GGUF-Datei."
@@ -83,11 +85,9 @@ def main():
     quant_tool = find_or_build_llama_quantize()
     print(f">> Verwende Quantisierungs-Tool: {quant_tool}")
 
-    levels = {
-        "1": ("Q4_K_M", "German-0_9_1-q4km.gguf"),
-        "2": ("Q5_K_M", "German-0_9_1-q5km.gguf"),
-        "3": ("Q8_0",   "German-0_9_1-q80.gguf")
-    }
+    out_dir = input_file.parent
+    out_dir.mkdir(parents=True, exist_ok=True)
+    levels = config.QUANT_LEVELS
 
     generated_files = {}
 
@@ -95,14 +95,15 @@ def main():
     print(" STARTE QUANTISIERUNG")
     print("="*45)
 
-    for key, (mode, outfile) in levels.items():
+    for key, (mode, filename) in levels.items():
+        outfile = out_dir / filename
         print(f"\n[Stufe {key}] Erstelle {mode} ({outfile})...")
-        cmd = [quant_tool, input_file, outfile, mode]
+        cmd = [quant_tool, str(input_file), str(outfile), mode]
 
         try:
             subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-            if os.path.exists(outfile):
-                size_mb = os.path.getsize(outfile) / (1024 * 1024)
+            if outfile.exists():
+                size_mb = outfile.stat().st_size / (1024 * 1024)
                 generated_files[key] = (outfile, size_mb)
                 print(f"Erfolgreich! Dateigröße: {size_mb:.2f} MB")
         except subprocess.CalledProcessError as e:
@@ -115,21 +116,21 @@ def main():
     print("\n" + "="*45)
     print(" ZUSAMMENFASSUNG & AUSWAHL")
     print("="*45)
-    for key, (filename, size) in generated_files.items():
+    for key, (filepath, size) in generated_files.items():
         mode_name = levels[key][0]
-        print(f" [{key}] {mode_name:7} -> {filename} ({size:.2f} MB)")
+        print(f" [{key}] {mode_name:7} -> {filepath.name} ({size:.2f} MB)")
     print(" [4] Alle behalten / Nicht überschreiben")
     print("="*45)
 
-    choice = input(f"\nWelche QUantisierung möchtest du als finales Modell nutzen? (1/2/3/4): ").strip()
+    choice = input("\nWelche Quantisierung möchtest du als finales Modell nutzen? (1/2/3/4): ").strip()
 
     if choice in generated_files:
         # Übrige generierte Varianten aufräumen
-        for k, (fname, _) in generated_files.items():
-            if k != choice and os.path.exists(fname):
-                os.remove(fname)
+        for k, (fpath, _) in generated_files.items():
+            if k != choice and fpath.exists():
+                fpath.unlink()
 
-        print(f"\n>>> Fertig! {levels[choice][1]} ist nun die gewählte {levels[choice][0]}-Version. <<<")
+        print(f"\n>>> Fertig! {generated_files[choice][0]} ist nun die gewählte {levels[choice][0]}-Version. <<<")
     else:
         print("\nKeine Ersetzung vorgenommen. Alle generierten Dateien verbleiben im Verzeichnis.")
 
