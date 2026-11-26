@@ -36,7 +36,7 @@ Für normale Nutzer empfiehlt sich **`German-v1-q5km.gguf`**. Wer genügend Spei
 ## Baue das Transformer-Modell selbst
 
 Nahezu alle Pfade, Architektur- und Metadaten-Parameter lassen sich zentral in `config.py` anpassen.  
-Die Rohdaten für Reddit(r/fragReddit) sind unter Artic Shift im jsonl-Format verfügbar, für Wikipedia bieten sich die 1M-Sentence Datensätze vom Leipzig Corpora Collection an
+Alle Trainingsdatenquellen inkl. Download-Links, Umfang und Lizenzen sind formal in [docs/DATASETS.md](docs/DATASETS.md) dokumentiert (inkl. automatischem Downloader via `scripts/download_datasets.py`).
 
 ### 1. Umgebung einrichten
 ```bash
@@ -84,18 +84,22 @@ futo-keyboard-german/
 ├── requirements.txt
 ├── setup.sh
 ├── config.py                     # Zentrale Konfiguration (Pfade, Architektur, FUTO-Flags)
-├── DataSet/                      # Rohdaten & generierter Korpus (corpus_de_v2.txt)
+├── docs/
+│   └── DATASETS.md               # Formale Übersicht der Datenquellen, Lizenzen & Links
+├── DataSet/                      # Rohdaten & generierter Korpus
 ├── tokenizer/
 │   ├── futo_de_15k_v2.model      # Aktiver FUTO-SentencePiece-Tokenizer
 │   └── futo_de_15k_v2.vocab
 ├── scripts/
-│   ├── build_corpus.py           # Korpus-Bereinigung, Filterung & Mix
+│   ├── download_datasets.py      # Download-Helper (Tatoeba, OpenSubtitles, Leipzig, FineWeb-2)
+│   ├── build_corpus.py           # Korpus-Bereinigung, Filterung & Multi-Source-Mix
 │   ├── train_tokenizer.py        # SentencePiece-Training & FUTO-Validierung
 │   ├── train_model.py            # PyTorch LLaMA-Training (Packing & <XBU>-Augmentierung)
 │   ├── build_gguf_pure.py        # Pure-Python GGUF-Export inkl. FUTO-Metadaten
 │   ├── quantize_model.py         # Quantisierung über llama-quantize
 │   └── Testing/
-│       ├── Benchmark.py          # Next-Word- & <XBU>-Benchmark (libllama.so & PyTorch)
+│       ├── Benchmark.py          # Kuratierter Next-Word- & <XBU>-Benchmark (libllama.so & PyTorch)
+│       ├── eval_heldout.py       # Held-out Next-Word, KSR & automatische <XBU>-Auswertung
 │       └── compare_to_original.py
 ├── Models/                       # Exportierte & quantisierte GGUF-Modelle
 └── patches/

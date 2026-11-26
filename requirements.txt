@@ -6,3 +6,6 @@ accelerate>=0.28.0
 numpy>=1.26.0
 safetensors>=0.4.0
 gguf>=0.10.0
+datasets>=3.0.0
+requests>=2.31.0
+tqdm>=4.66.0

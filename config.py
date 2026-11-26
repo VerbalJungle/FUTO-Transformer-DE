@@ -4,10 +4,13 @@ from pathlib import Path
 # --- PFADE ---
 BASE_DIR = Path(__file__).resolve().parent
 DATASET_DIR = BASE_DIR / "DataSet"
-KORPUS_NAME = "corpus_de_v2.txt"
+KORPUS_NAME = "corpus_de_v1_5.txt"
 CORPUS_PATH = DATASET_DIR / KORPUS_NAME
+COOLDOWN_CORPUS_PATH = DATASET_DIR / "corpus_de_v1_5_cooldown.txt"
+HELDOUT_PATH = DATASET_DIR / "heldout_benchmark.jsonl"
+CORPUS_STATS_PATH = DATASET_DIR / "corpus_de_v1_5_stats.json"
 TOKENIZER_DIR = BASE_DIR / "tokenizer"
-TOKENIZER_PREFIX = TOKENIZER_DIR / "futo_de_15k_v2"
+TOKENIZER_PREFIX = TOKENIZER_DIR / "futo_de_15k_v1_5"
 MODEL_DIR = BASE_DIR / "futo_de_final"
 TOKENIZER_PATH = MODEL_DIR / "tokenizer.model"
 FALLBACK_TOKENIZER_PATH = TOKENIZER_DIR / "futo_de_15k_v2.model"
@@ -15,12 +18,23 @@ SAFETENSOR_PATH = MODEL_DIR / "model.safetensors"
 LLAMA_DIR = BASE_DIR / "llama.cpp"
 ORIGINALMODEL = BASE_DIR / "Models" / "ml4_q6_k.gguf"  # bitte entsprechend des Speicherortes anpassen
 
+# Zielgewichte fuer den v1.5 Multi-Source-Korpus (Summe = 1.0)
+CORPUS_SOURCE_WEIGHTS = {
+    "fragreddit": 0.32,
+    "opensubtitles": 0.23,
+    "fineweb2": 0.22,
+    "leipzig_web": 0.09,
+    "wikipedia": 0.06,
+    "leipzig_news": 0.05,
+    "tatoeba": 0.03,
+}
+
 # GGUF Output-Namen
-RAW_GGUF_NAME = "German-v1-unquantized.gguf"
+RAW_GGUF_NAME = "German-v1.5-unquantized.gguf"
 OUTPUT_GGUF_PATH = BASE_DIR / "Models" / RAW_GGUF_NAME
 
 # --- MODELL-METADATEN & ARCHITEKTUR  ---
-MODEL_NAME = "Futo_De_1"
+MODEL_NAME = "Futo_De_1_5"
 SIZE_LABEL = "40M"
 TYPE = "model"
 LANGUAGE = "de"
@@ -60,7 +74,7 @@ FUTO_TOKENIZER_TYPE = "sentencepiece"
 
 # --- QUANTISIERUNG ---
 QUANT_LEVELS = {
-    "1": ("Q4_K_M", "German-v1-q4km.gguf"),
-    "2": ("Q5_K_M", "German-v1-q5km.gguf"),
-    "3": ("Q8_0",   "German-v1-q80.gguf"),
+    "1": ("Q4_K_M", "German-v1.5-q4km.gguf"),
+    "2": ("Q5_K_M", "German-v1.5-q5km.gguf"),
+    "3": ("Q8_0",   "German-v1.5-q80.gguf"),
 }

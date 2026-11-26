@@ -1,12 +1,13 @@
 """FUTO-DE Benchmark für GGUF (via libllama.so) und HuggingFace-PyTorch-Modelle.
 
 Testet sowohl Next-Word-Prediction als auch FUTOs <XBU>-Autokorrektur-Protokoll
-(Wortvervollständigung, Tippfehler, deutsche Umlaute/ß und Identitätserhalt).
+über 11 erweiterte Kategorien inkl. Case-Sensitivity-Auswertung und JSON-Export.
 """
 from __future__ import annotations
 
 import argparse
 import ctypes
+import json
 import sys
 import time
 from ctypes import (
@@ -301,7 +302,6 @@ class FutoPredictor:
             )
         )
 
-        # Analog LanguageModel.cpp: Sonderzeichen & Kontroll-Tokens im Beam unterdrücken
         banned = np.zeros(self.vocab_size, dtype=bool)
         for tid in range(min(self.sp.vocab_size(), self.vocab_size)):
             if self.sp.is_control(tid) or self.sp.is_unknown(tid) or self.sp.is_unused(tid):
@@ -396,8 +396,11 @@ class FutoPredictor:
         return dedup[:top_k]
 
     def predict_next_word(self, context: str, top_k: int = 3) -> list[tuple[str, float]]:
-        prompt_text = context.strip() if context.endswith("-") else f"{context.strip()} "
-        prompt_ids = [self.bos_id] + self.sp.encode_as_ids(prompt_text)
+        if not context.strip():
+            prompt_ids = [self.bos_id]
+        else:
+            prompt_text = context.strip() if context.endswith("-") else f"{context.strip()} "
+            prompt_ids = [self.bos_id] + self.sp.encode_as_ids(prompt_text)
         return self._beam_search(prompt_ids, top_k=top_k, allow_xec=False)
 
     def predict_xbu(self, context: str, typed: str, top_k: int = 3) -> list[tuple[str, float]]:
@@ -414,11 +417,10 @@ class FutoPredictor:
         return self._beam_search(prompt_ids, top_k=top_k, allow_xec=True)
 
 
-# --- Test-Suite (Next-Word + FUTO <XBU>) ---
-# Format: ("next", context, expected_list) oder ("xbu", context, typed_keys, expected_list)
+# --- Erweiterte kuratierte Test-Suite (165 Fälle in 11 Kategorien) ---
 
 TEST_SUITE: dict[str, list[tuple]] = {
-    "1. Next-Word: Entitäten & Geografie": [
+    "1. NW: Entitäten & Geografie": [
         ("next", "Costa", ["Rica"]),
         ("next", "San", ["Francisco", "Diego"]),
         ("next", "New", ["York"]),
@@ -427,18 +429,46 @@ TEST_SUITE: dict[str, list[tuple]] = {
         ("next", "Buenos", ["Aires"]),
         ("next", "Vereinigte", ["Staaten", "Nationen"]),
         ("next", "Nordrhein-", ["Westfalen"]),
+        ("next", "Baden-", ["Württemberg"]),
+        ("next", "Los", ["Angeles"]),
+        ("next", "Europäische", ["Union", "Kommission", "Zentralbank"]),
+        ("next", "Brandenburger", ["Tor"]),
     ],
-    "2. Next-Word: Alltagsphrasen & Chat": [
+    "2. NW: Messenger & Chat": [
         ("next", "Guten", ["Morgen", "Tag", "Abend"]),
-        ("next", "Vielen Dank für", ["die", "deine", "das", "Ihre"]),
         ("next", "Ich melde mich", ["gleich", "später", "nachher", "morgen", "noch", "wieder"]),
         ("next", "Bin gerade", ["unterwegs", "noch", "im", "beim", "dabei", "auf"]),
         ("next", "Wann bist du", ["da", "zu", "fertig", "wieder", "zuhause", "morgen"]),
         ("next", "Schönes", ["Wochenende", "Fest"]),
         ("next", "Bis", ["gleich", "morgen", "später", "dann", "bald"]),
         ("next", "Kein", ["Problem", "Ding"]),
+        ("next", "Hast du heute Abend", ["Zeit", "Lust", "schon", "was", "etwas"]),
+        ("next", "Ich bin gleich", ["da", "fertig", "wieder", "zuhause", "bei"]),
+        ("next", "Gib mir kurz", ["Bescheid", "Zeit", "noch", "ein"]),
+        ("next", "Tut mir echt", ["leid", "Leid"]),
+        ("next", "Sag mal, hast du", ["Lust", "Zeit", "schon", "eine", "ein", "eine"]),
+        ("next", "Kommst du nachher noch", ["vorbei", "mit", "kurz", "rüber", "nach"]),
+        ("next", "Wir können ja morgen", ["noch", "mal", "telefonieren", "sehen", "weiter", "wieder"]),
+        ("next", "Gute", ["Nacht", "Besserung", "Idee", "Fahrt"]),
+        ("next", "Lass uns später", ["nochmal", "noch", "kurz", "telefonieren", "schreiben", "reden"]),
+        ("next", "Alles", ["klar", "gut", "Gute"]),
+        ("next", "Danke", ["schön", "sehr", "dir", "euch", "für"]),
     ],
-    "3. Next-Word: Grammatik & Nebensatz": [
+    "3. NW: Formell & E-Mail (Siezen)": [
+        ("next", "Sehr geehrte", ["Damen", "Frau", "Herren"]),
+        ("next", "Sehr geehrte Damen und", ["Herren"]),
+        ("next", "Vielen Dank für Ihre", ["Nachricht", "Antwort", "Rückmeldung", "Hilfe", "Mühe", "E-Mail"]),
+        ("next", "Mit freundlichen", ["Grüßen"]),
+        ("next", "Bei Rückfragen stehe ich", ["Ihnen", "gerne"]),
+        ("next", "Ich freue mich auf Ihre", ["Rückmeldung", "Antwort", "Nachricht"]),
+        ("next", "Im Anhang finden", ["Sie"]),
+        ("next", "Könnten Sie mir bitte", ["mitteilen", "sagen", "helfen", "ein", "eine", "noch"]),
+        ("next", "Wir wünschen Ihnen ein schönes", ["Wochenende", "Fest", "Jahr"]),
+        ("next", "Für Ihr Verständnis vielen", ["Dank"]),
+        ("next", "Ich bitte um kurze", ["Rückmeldung", "Bestätigung", "Antwort", "Info"]),
+        ("next", "Herzlichen Dank im", ["Voraus"]),
+    ],
+    "4. NW: Grammatik (Kasus/Genus/das-dass)": [
         ("next", "Ich bleibe heute daheim, weil ich krank", ["bin", "geworden", "war"]),
         ("next", "Er fährt morgen mit dem", ["Zug", "Auto", "Bus", "Fahrrad", "Rad"]),
         ("next", "Trotz des schlechten", ["Wetters"]),
@@ -447,16 +477,71 @@ TEST_SUITE: dict[str, list[tuple]] = {
         ("next", "Ich freue mich schon auf das", ["Wochenende", "Treffen", "Spiel", "Konzert", "Essen"]),
         ("next", "Kannst du mir bitte", ["helfen", "sagen", "mal", "ein", "eine"]),
         ("next", "Ich weiß nicht, ob ich das", ["schaffe", "will", "kann", "richtig", "mache", "so"]),
+        ("next", "Es freut mich, dass du", ["da", "es", "so", "wieder", "gekommen", "dich"]),
+        ("next", "Sie hat vergessen, mir zu", ["schreiben", "antworten", "sagen", "helfen", "danken"]),
+        ("next", "Wegen der hohen", ["Kosten", "Preise", "Nachfrage", "Temperaturen"]),
+        ("next", "Während des gesamten", ["Tages", "Jahres", "Wochenendes", "Urlaubs", "Zeitraums"]),
+        ("next", "Er hat das Buch auf den", ["Tisch", "Boden", "Schrank", "Schreibtisch"]),
+        ("next", "Sie sitzt schon seit einer", ["Stunde", "Woche", "halben", "Weile"]),
+        ("next", "Das ist das Beste, was mir", ["passiert", "je", "heute", "bisher"]),
+        ("next", "Seid ihr alle gut nach Hause", ["gekommen"]),
+        ("next", "Ich habe mir vorgenommen, mehr", ["Zeit", "Sport", "zu", "Wasser"]),
+        ("next", "Obwohl er müde war, hat", ["er"]),
     ],
-    "4. XBU: Wortvervollständigung (Präfix)": [
+    "5. NW: Alltag & Redewendungen": [
+        ("next", "Vielen Dank für", ["die", "deine", "das", "Ihre"]),
+        ("next", "Im Großen und", ["Ganzen"]),
+        ("next", "Hin und", ["wieder", "her", "zurück"]),
+        ("next", "Ab und", ["zu", "an"]),
+        ("next", "Unter anderem", ["auch", "für", "bei", "mit", "deshalb"]),
+        ("next", "Meiner Meinung", ["nach"]),
+        ("next", "Auf jeden", ["Fall"]),
+        ("next", "Am besten wäre", ["es"]),
+        ("next", "Das macht keinen", ["Sinn", "Unterschied", "Spaß"]),
+        ("next", "Ehrlich gesagt habe ich", ["keine", "noch", "da", "es", "mich"]),
+        ("next", "Es kommt ganz darauf", ["an"]),
+        ("next", "Ich habe heute keine", ["Zeit", "Lust", "Ahnung", "Kraft"]),
+        ("next", "Von mir aus", ["gerne", "kann", "auch", "ja"]),
+        ("next", "Ich halte dich auf dem", ["Laufenden"]),
+        ("next", "Das ist mir völlig", ["egal", "klar", "neu", "gleich"]),
+    ],
+    "6. XBU: Präfix-Vervollständigung": [
         ("xbu", "Ich fahre zum", "hauptb", ["Hauptbahnhof"]),
         ("xbu", "Hast du meine", "nachr", ["Nachricht", "Nachrichten"]),
         ("xbu", "Wir müssen noch", "eink", ["einkaufen"]),
         ("xbu", "Können wir kurz", "telefon", ["telefonieren"]),
         ("xbu", "Ich wünsche dir ein schönes", "wochen", ["Wochenende"]),
         ("xbu", "Das klappt", "wahrsche", ["wahrscheinlich"]),
+        ("xbu", "Herzlichen", "gluckw", ["Glückwunsch"]),
+        ("xbu", "Das war eine große", "uberrasch", ["Überraschung"]),
+        ("xbu", "Ich muss noch schnell eine", "entscheid", ["Entscheidung"]),
+        ("xbu", "Bitte schick mir die", "unterl", ["Unterlagen"]),
+        ("xbu", "Wir treffen uns am", "donner", ["Donnerstag"]),
+        ("xbu", "Der Termin findet im", "septemb", ["September"]),
+        ("xbu", "Ich habe leider keine", "inform", ["Informationen", "Information"]),
+        ("xbu", "Das ist eine gute", "moglichk", ["Möglichkeit"]),
+        ("xbu", "Kannst du die", "temperat", ["Temperatur"]),
+        ("xbu", "Er arbeitet in der", "verwal", ["Verwaltung"]),
+        ("xbu", "Wir brauchen noch", "unterst", ["Unterstützung"]),
+        ("xbu", "Es gibt ein", "problem", ["Problem", "Probleme"]),
     ],
-    "5. XBU: Tippfehler-Autokorrektur": [
+    "7. XBU: Präfix + Tippfehler": [
+        ("xbu", "Ich fahre zum", "huaptb", ["Hauptbahnhof"]),
+        ("xbu", "Hast du meine", "nahcr", ["Nachricht", "Nachrichten"]),
+        ("xbu", "Das klappt", "wahrshc", ["wahrscheinlich"]),
+        ("xbu", "Ich wünsche dir ein schönes", "wcohen", ["Wochenende"]),
+        ("xbu", "Können wir kurz", "telrfon", ["telefonieren"]),
+        ("xbu", "Bitte schick mir die", "utnerl", ["Unterlagen"]),
+        ("xbu", "Wir treffen uns am", "dnnerst", ["Donnerstag"]),
+        ("xbu", "Wir müssen noch", "ienkauf", ["einkaufen"]),
+        ("xbu", "Das ist eine wichtige", "entschdi", ["Entscheidung"]),
+        ("xbu", "Vielen Dank für die", "utnerst", ["Unterstützung"]),
+        ("xbu", "Ich brauche noch mehr", "infromat", ["Informationen"]),
+        ("xbu", "Das ist eine echte", "uberrash", ["Überraschung"]),
+        ("xbu", "Der Zug hat heute", "verspaet", ["Verspätung"]),
+        ("xbu", "Es gibt ein kleines", "porbl", ["Problem"]),
+    ],
+    "8. XBU: Tippfehler-Autokorrektur": [
         ("xbu", "Ich komme", "heuet", ["heute"]),
         ("xbu", "Das ist", "vieleicht", ["vielleicht"]),
         ("xbu", "Bis", "mrogn", ["morgen"]),
@@ -465,8 +550,18 @@ TEST_SUITE: dict[str, list[tuple]] = {
         ("xbu", "Vielen", "dnka", ["Dank"]),
         ("xbu", "Gute", "iede", ["Idee"]),
         ("xbu", "Ich habe keine", "ahnugn", ["Ahnung"]),
+        ("xbu", "Das ist wirklich", "scher", ["schwer", "sehr"]),
+        ("xbu", "Kannst du mir das bitte", "erklaern", ["erklären"]),
+        ("xbu", "Ich freue mich", "riesgi", ["riesig"]),
+        ("xbu", "Wir sehen uns", "spaetr", ["später"]),
+        ("xbu", "Das Wetter ist heute", "wunderschoe", ["wunderschön"]),
+        ("xbu", "Ich muss morgen früh", "aufstehn", ["aufstehen"]),
+        ("xbu", "Das habe ich mir", "gedcaht", ["gedacht"]),
+        ("xbu", "Entschuldige die späte", "antowrt", ["Antwort"]),
+        ("xbu", "Alles klar, bis", "glecih", ["gleich"]),
+        ("xbu", "Hast du das schon", "gesehn", ["gesehen"]),
     ],
-    "6. XBU: Deutsche Umlaute & ß": [
+    "9. XBU: Deutsche Umlaute & ß": [
         ("xbu", "Vielen Dank", "fur", ["für"]),
         ("xbu", "Wir", "konnen", ["können"]),
         ("xbu", "Ich freue mich", "uber", ["über"]),
@@ -475,13 +570,42 @@ TEST_SUITE: dict[str, list[tuple]] = {
         ("xbu", "Wir", "knnen", ["können"]),
         ("xbu", "Das ist", "fr", ["für"]),
         ("xbu", "Die richtige", "groe", ["Größe"]),
+        ("xbu", "Ich hätte gerne einen Kaffee und ein", "stuck", ["Stück"]),
+        ("xbu", "Das müssen wir noch", "klaren", ["klären"]),
+        ("xbu", "Wir haben uns schon lange nicht mehr", "gehort", ["gehört"]),
+        ("xbu", "Es wird langsam wieder", "kalter", ["kälter"]),
+        ("xbu", "Draußen ist es heute ziemlich", "heiss", ["heiß"]),
+        ("xbu", "Er fährt gerne mit dem", "zug", ["Zug"]),
+        ("xbu", "Das ist die beste", "losung", ["Lösung"]),
+        ("xbu", "Bis", "spater", ["später"]),
     ],
-    "7. XBU: Identität (keine Fehlkorrektur)": [
+    "10. XBU: Satzanfang (ohne Kontext)": [
+        ("xbu", "", "guten", ["Guten", "guten"]),
+        ("xbu", "", "hallo", ["Hallo"]),
+        ("xbu", "", "vielen", ["Vielen"]),
+        ("xbu", "", "ich", ["Ich"]),
+        ("xbu", "", "danke", ["Danke"]),
+        ("xbu", "", "entschuldigung", ["Entschuldigung"]),
+        ("xbu", "", "kannst", ["Kannst"]),
+        ("xbu", "", "wahrsche", ["Wahrscheinlich"]),
+        ("xbu", "", "vielicht", ["Vielleicht"]),
+        ("xbu", "", "schones", ["Schönes"]),
+        ("xbu", "", "heuet", ["Heute"]),
+        ("xbu", "", "ubrigens", ["Übrigens"]),
+    ],
+    "11. XBU: Identität & Groß-/Kleinschreibung": [
         ("xbu", "Ich gehe", "heute", ["heute"]),
         ("xbu", "Wir bleiben zu", "hause", ["Hause"]),
         ("xbu", "Bis", "morgen", ["morgen"]),
         ("xbu", "Wir gehen", "spazieren", ["spazieren"]),
         ("xbu", "Ich habe", "hunger", ["Hunger"]),
+        ("xbu", "Das macht keinen", "sinn", ["Sinn"]),
+        ("xbu", "Am Ende des", "tages", ["Tages"]),
+        ("xbu", "Er trinkt morgens gerne einen", "kaffee", ["Kaffee"]),
+        ("xbu", "Wir müssen das", "essen", ["essen", "Essen"]),
+        ("xbu", "Ich bin gleich wieder", "zuruck", ["zurück"]),
+        ("xbu", "Das dauert nur eine", "minute", ["Minute"]),
+        ("xbu", "Schönen", "abend", ["Abend"]),
     ],
 }
 
@@ -493,6 +617,8 @@ class CategoryStats:
     skipped: int = 0
     top1: int = 0
     top3: int = 0
+    case_top1: int = 0
+    case_top3: int = 0
 
 
 @dataclass
@@ -502,6 +628,8 @@ class ModelSummary:
     total: int
     top1: int
     top3: int
+    case_top1: int
+    case_top3: int
     avg_ms: float
     next_top1: int
     next_top3: int
@@ -509,9 +637,12 @@ class ModelSummary:
     xbu_top1: int
     xbu_top3: int
     xbu_total: int
+    categories: list[dict]
 
 
-def _is_match(pred: str, expected: list[str]) -> bool:
+def _is_match(pred: str, expected: list[str], case_sensitive: bool = False) -> bool:
+    if case_sensitive:
+        return any(pred == exp for exp in expected)
     pred_l = pred.lower()
     return any(pred_l == exp.lower() for exp in expected)
 
@@ -527,9 +658,9 @@ def benchmark_model(
     else:
         size_mb = sum(f.stat().st_size for f in path.rglob("*.safetensors")) / (1024 * 1024)
 
-    print(f"\n{'=' * 72}")
+    print(f"\n{'=' * 78}")
     print(f" MODELL: {backend.name} ({size_mb:.1f} MB) | XBU aktiv: {predictor.supports_xbu}")
-    print(f"{'=' * 72}")
+    print(f"{'=' * 78}")
 
     cat_stats: list[CategoryStats] = []
     latencies: list[float] = []
@@ -560,12 +691,16 @@ def benchmark_model(
                 latencies.append(ms)
 
                 words = [w for w, _ in preds]
-                hit1 = bool(words) and _is_match(words[0], expected)
-                hit3 = any(_is_match(w, expected) for w in words)
+                hit1 = bool(words) and _is_match(words[0], expected, case_sensitive=False)
+                hit3 = any(_is_match(w, expected, case_sensitive=False) for w in words)
+                case1 = bool(words) and _is_match(words[0], expected, case_sensitive=True)
+                case3 = any(_is_match(w, expected, case_sensitive=True) for w in words)
 
                 st.total += 1
                 st.top1 += int(hit1)
                 st.top3 += int(hit3)
+                st.case_top1 += int(case1)
+                st.case_top3 += int(case3)
                 if mode == "next":
                     next_n += 1
                     next_t1 += int(hit1)
@@ -578,7 +713,7 @@ def benchmark_model(
                 if verbose:
                     tag = "✓ T1" if hit1 else ("~ T3" if hit3 else "✗ FAIL")
                     print(
-                        f"  {tag:<6} | {prompt_lbl:<40} -> {words} | "
+                        f"  {tag:<6} | {prompt_lbl:<42} -> {words} | "
                         f"Erwartet: {expected} ({ms:.1f} ms)"
                     )
             cat_stats.append(st)
@@ -588,25 +723,41 @@ def benchmark_model(
     total = sum(s.total for s in cat_stats)
     top1 = sum(s.top1 for s in cat_stats)
     top3 = sum(s.top3 for s in cat_stats)
+    case_top1 = sum(s.case_top1 for s in cat_stats)
+    case_top3 = sum(s.case_top3 for s in cat_stats)
     avg_ms = sum(latencies) / len(latencies) if latencies else 0.0
 
     print("\n--- Kategorie-Auswertung ---")
+    cat_dicts: list[dict] = []
     for s in cat_stats:
         if s.total == 0:
-            print(f"  {s.name:<40} | übersprungen (kein <XBU>-Tokenizer)")
+            print(f"  {s.name:<42} | übersprungen (kein <XBU>-Tokenizer)")
             continue
         p1 = s.top1 / s.total * 100
         p3 = s.top3 / s.total * 100
+        c1 = s.case_top1 / s.total * 100
         print(
-            f"  {s.name:<40} | Top-1: {s.top1:2}/{s.total:2} ({p1:5.1f}%) | "
-            f"Top-3: {s.top3:2}/{s.total:2} ({p3:5.1f}%)"
+            f"  {s.name:<42} | Top-1: {s.top1:2}/{s.total:2} ({p1:5.1f}%) | "
+            f"Top-3: {s.top3:2}/{s.total:2} ({p3:5.1f}%) | Case-T1: {c1:5.1f}%"
         )
+        cat_dicts.append({
+            "name": s.name,
+            "total": s.total,
+            "top1": s.top1,
+            "top3": s.top3,
+            "case_top1": s.case_top1,
+            "case_top3": s.case_top3,
+            "top1_pct": round(p1, 2),
+            "top3_pct": round(p3, 2),
+            "case_top1_pct": round(c1, 2),
+        })
 
-    print("-" * 72)
+    print("-" * 78)
     if total:
         print(
             f"  GESAMT ({total} Tests) | Top-1: {top1}/{total} ({top1/total*100:.1f}%) | "
-            f"Top-3: {top3}/{total} ({top3/total*100:.1f}%) | Ø Latenz: {avg_ms:.1f} ms"
+            f"Top-3: {top3}/{total} ({top3/total*100:.1f}%) | "
+            f"Case-T1: {case_top1/total*100:.1f}% | Ø Latenz: {avg_ms:.1f} ms"
         )
     if next_n:
         print(
@@ -621,18 +772,38 @@ def benchmark_model(
 
     return ModelSummary(
         label=path.name,
-        size_mb=size_mb,
+        size_mb=round(size_mb, 2),
         total=total,
         top1=top1,
         top3=top3,
-        avg_ms=avg_ms,
+        case_top1=case_top1,
+        case_top3=case_top3,
+        avg_ms=round(avg_ms, 2),
         next_top1=next_t1,
         next_top3=next_t3,
         next_total=next_n,
         xbu_top1=xbu_t1,
         xbu_top3=xbu_t3,
         xbu_total=xbu_n,
+        categories=cat_dicts,
     )
+
+
+def resolve_default_model() -> Path:
+    models_dir = config.OUTPUT_GGUF_PATH.parent
+    candidates = [
+        models_dir / "German-v1.5-q5km.gguf",
+        models_dir / "German-v1-q5km.gguf",
+        models_dir / "German-v1-q80.gguf",
+        config.OUTPUT_GGUF_PATH,
+    ]
+    for cand in candidates:
+        if cand.exists():
+            return cand
+    existing_ggufs = sorted(models_dir.glob("*.gguf"), key=lambda p: p.stat().st_size)
+    if existing_ggufs:
+        return existing_ggufs[0]
+    return config.OUTPUT_GGUF_PATH
 
 
 def resolve_targets(args: argparse.Namespace) -> list[Path]:
@@ -644,8 +815,7 @@ def resolve_targets(args: argparse.Namespace) -> list[Path]:
         return targets
     if args.models:
         return [Path(m) for m in args.models]
-    q80 = config.OUTPUT_GGUF_PATH.parent / "transformer_de_DE_q80.gguf"
-    return [q80 if q80.exists() else config.OUTPUT_GGUF_PATH]
+    return [resolve_default_model()]
 
 
 def main() -> None:
@@ -656,6 +826,7 @@ def main() -> None:
     parser.add_argument("--threads", type=int, default=4)
     parser.add_argument("--device", default="cpu", help="PyTorch-Device (cpu / cuda).")
     parser.add_argument("--summary-only", "-q", action="store_true")
+    parser.add_argument("--json-out", type=Path, default=None, help="Ergebnisse als JSON speichern.")
     args = parser.parse_args()
 
     targets = resolve_targets(args)
@@ -668,23 +839,51 @@ def main() -> None:
     ]
 
     if len(summaries) > 1:
-        print(f"\n{'=' * 72}")
+        print(f"\n{'=' * 84}")
         print(" VERGLEICHSTABELLE")
-        print(f"{'=' * 72}")
+        print(f"{'=' * 84}")
         print(
-            f"  {'Modell':<30} | {'MB':>6} | {'Top-1':>7} | {'Top-3':>7} | "
-            f"{'NW T1':>6} | {'XBU T1':>6} | {'ms':>6}"
+            f"  {'Modell':<28} | {'MB':>6} | {'Top-1':>7} | {'Top-3':>7} | "
+            f"{'CaseT1':>6} | {'NW T1':>6} | {'XBU T1':>6} | {'ms':>6}"
         )
-        print("-" * 72)
+        print("-" * 84)
         for s in summaries:
             t1_p = f"{s.top1/s.total*100:5.1f}%" if s.total else "  n/a "
             t3_p = f"{s.top3/s.total*100:5.1f}%" if s.total else "  n/a "
+            c1_p = f"{s.case_top1/s.total*100:5.1f}%" if s.total else "  n/a "
             nw_p = f"{s.next_top1/s.next_total*100:5.1f}%" if s.next_total else "  n/a "
             xbu_p = f"{s.xbu_top1/s.xbu_total*100:5.1f}%" if s.xbu_total else "  n/a "
             print(
-                f"  {s.label:<30} | {s.size_mb:6.1f} | {t1_p:>7} | {t3_p:>7} | "
-                f"{nw_p:>6} | {xbu_p:>6} | {s.avg_ms:6.1f}"
+                f"  {s.label:<28} | {s.size_mb:6.1f} | {t1_p:>7} | {t3_p:>7} | "
+                f"{c1_p:>6} | {nw_p:>6} | {xbu_p:>6} | {s.avg_ms:6.1f}"
             )
+
+    if args.json_out is not None:
+        args.json_out.parent.mkdir(parents=True, exist_ok=True)
+        payload = [
+            {
+                "label": s.label,
+                "size_mb": s.size_mb,
+                "total": s.total,
+                "top1": s.top1,
+                "top3": s.top3,
+                "top1_pct": round(s.top1 / s.total * 100, 2) if s.total else 0.0,
+                "top3_pct": round(s.top3 / s.total * 100, 2) if s.total else 0.0,
+                "case_top1_pct": round(s.case_top1 / s.total * 100, 2) if s.total else 0.0,
+                "case_top3_pct": round(s.case_top3 / s.total * 100, 2) if s.total else 0.0,
+                "avg_ms": s.avg_ms,
+                "next_top1": s.next_top1,
+                "next_top3": s.next_top3,
+                "next_total": s.next_total,
+                "xbu_top1": s.xbu_top1,
+                "xbu_top3": s.xbu_top3,
+                "xbu_total": s.xbu_total,
+                "categories": s.categories,
+            }
+            for s in summaries
+        ]
+        args.json_out.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+        print(f"\n[✓] Benchmark-JSON gespeichert: {args.json_out}")
 
 
 if __name__ == "__main__":
