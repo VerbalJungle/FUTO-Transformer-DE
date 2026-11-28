@@ -69,10 +69,10 @@ Optionale Parameter für `FineWeb-2`:
 
 ## 4. Korpus-Statistik-Protokoll
 
-| Version | Quellen | Dateigröße | Zeilen (Chunks) | Wörter | Gespeichert in |
-| :--- | :--- | :--- | :--- | :--- | :--- |
-| **v1** | ~85 % `r/FragReddit`, ~15 % `Wikipedia 2021` | `528 MB` | `4.363.852` | `85.321.580` | `DataSet/corpus_de_v2.txt` |
-| **v1.5** | FragReddit + OpenSubtitles + FineWeb-2 DE + Leipzig (Web/Wiki/News) + Tatoeba | *nach Build in `corpus_de_v1_5_stats.json`* | *–* | *–* | `DataSet/corpus_de_v1_5.txt` |
+| Version | Quellen | Dateigröße | Zeilen (Chunks) | Wörter       | Gespeichert in |
+| :--- | :--- | :--- |:----------------|:-------------| :--- |
+| **v1** | ~85 % `r/FragReddit`, ~15 % `Wikipedia 2021` | `528 MB` | `4.363.852`     | `85.321.580` | `DataSet/corpus_de_v2.txt` |
+| **v1.5** | FragReddit + OpenSubtitles + FineWeb-2 DE + Leipzig (Web/Wiki/News) + Tatoeba | `1,38 GB` (`1.377 MB`) | *`11,09 mio`*     | *`214,4 mio`*  | `DataSet/corpus_de_v1_5.txt` |
 
 Nach jedem Lauf von `python scripts/build_corpus.py` wird automatisch `DataSet/corpus_de_v1_5_stats.json` mit exakten Zeilen-, Wörter-, Byte- und Prozentwerten pro Quelle aktualisiert.
 

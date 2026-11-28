@@ -14,6 +14,8 @@ env/
 futo_de_final/
 futo_de_checkpoints/
 futo_de_final_checkpoints/
+futo_de_final_checkpoints_cooldown/
+*_checkpoints*/
 futo_de_cache/
 
 # Korpus-Dateien
@@ -32,3 +34,5 @@ dist/
 *.sublime-project
 *log.txt
 skills
+
+Extern-Markdown

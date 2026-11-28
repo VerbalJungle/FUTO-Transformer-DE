@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import gzip
+import io
 import json
 import sys
 import tarfile
@@ -202,7 +203,11 @@ def download_fineweb2(
         "HuggingFaceFW/fineweb-2", name="deu_Latn", split="train", streaming=True
     )
     with (
-        gzip.open(part, "wt", encoding="utf-8", compresslevel=5) as gz,
+        part.open("wb") as raw_f,
+        gzip.GzipFile(
+            filename="fineweb2_de.jsonl", mode="wb", fileobj=raw_f, compresslevel=5
+        ) as gz_bin,
+        io.TextIOWrapper(gz_bin, encoding="utf-8") as gz,
         tqdm(total=max_bytes, unit="B", unit_scale=True, unit_divisor=1024, desc="fineweb2") as pbar,
     ):
         for row in stream:

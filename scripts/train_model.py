@@ -8,6 +8,8 @@
 from __future__ import annotations
 
 import argparse
+import json
+import math
 import multiprocessing
 import os
 import random
@@ -432,6 +434,20 @@ class EpochUpdateCallback(TrainerCallback):
         self.train_dataset.set_epoch(int(state.epoch or 0))
 
 
+class DivergenceGuardCallback(TrainerCallback):
+    """Bricht frühzeitig ab, wenn Loss oder Grad-Norm auf NaN/Inf/0.0 divergieren."""
+
+    def on_log(self, args, state, control, logs=None, **kwargs):
+        if not logs:
+            return
+        loss = logs.get("loss")
+        if loss is not None and (not math.isfinite(loss) or (state.global_step >= 10 and loss == 0.0)):
+            raise RuntimeError(f"Training divergiert bei Step {state.global_step}: logs={logs}")
+        grad_norm = logs.get("grad_norm")
+        if grad_norm is not None and not math.isfinite(grad_norm):
+            raise RuntimeError(f"Grad-Norm nicht endlich bei Step {state.global_step}: logs={logs}")
+
+
 class FutoTrainer(Trainer):
     """Trainer mit 2D-QWERTZ Soft-Embedding-Mixing und getrennter Eval-NW/XBU-Auswertung."""
 
@@ -492,7 +508,7 @@ class FutoTrainer(Trainer):
         inputs_embeds[do_mix] = mixed
         return inputs_embeds
 
-    def compute_loss(self, model, inputs, return_outputs=False, **kwargs):
+    def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
         loss_types = inputs.pop("loss_types", None)
         input_ids = inputs.pop("input_ids")
         inputs_embeds = self._build_inputs_embeds(model, input_ids)
@@ -531,8 +547,16 @@ class FutoTrainer(Trainer):
 
             return (loss, outputs) if return_outputs else loss
 
+        if self.model_accepts_loss_kwargs and num_items_in_batch is not None:
+            inputs["num_items_in_batch"] = num_items_in_batch
         outputs = model(inputs_embeds=inputs_embeds, **inputs)
         loss = outputs.loss
+        if (
+            self.args.average_tokens_across_devices
+            and self.model_accepts_loss_kwargs
+            and num_items_in_batch is not None
+        ):
+            loss *= self.accelerator.num_processes if self.args.n_gpu <= 1 else self.args.n_gpu
         return (loss, outputs) if return_outputs else loss
 
     def evaluate(self, eval_dataset=None, ignore_keys=None, metric_key_prefix: str = "eval"):
@@ -574,12 +598,37 @@ def _split_train_val_offsets(
     return train_offsets, val_offsets
 
 
+def _save_final_artifacts(trainer_obj: Trainer, output_dir: Path, tokenizer_path: Path, label: str) -> None:
+    """Speichert Modell und Tokenizer sofort sauber ins Zielverzeichnis."""
+    output_dir.mkdir(parents=True, exist_ok=True)
+    trainer_obj.save_model(str(output_dir))
+    dst_tok = output_dir / "tokenizer.model"
+    if tokenizer_path.resolve() != dst_tok.resolve():
+        shutil.copy2(tokenizer_path, dst_tok)
+    print(f"[✓] {label} gespeichert in: {output_dir}")
+
+
+def _read_checkpoint_steps(ckpt_dir: Path, fallback: int = 13_000) -> int:
+    state_path = ckpt_dir / "trainer_state.json"
+    if state_path.exists():
+        try:
+            data = json.loads(state_path.read_text(encoding="utf-8"))
+            step = int(data.get("global_step") or 0)
+            if step > 0:
+                return step
+        except Exception:
+            pass
+    return fallback
+
+
 def train(args: argparse.Namespace) -> None:
     has_cuda = torch.cuda.is_available() and torch.cuda.device_count() > 0
     if not args.dry_run and not has_cuda:
         raise RuntimeError("FEHLER: ROCm/CUDA erkennt keine GPU! Training wird nicht auf CPU gestartet.")
     if has_cuda:
         torch.set_float32_matmul_precision("high")
+        # Workaround für PyTorch 2.6 / ROCm 6.1 mem_efficient_sdp Backward-Bug bei 4D-Block-Masken
+        torch.backends.cuda.enable_mem_efficient_sdp(False)
 
     device_name = torch.cuda.get_device_name(0) if has_cuda else "CPU (dry-run)"
     print(f"Aktives Gerät: {device_name}")
@@ -588,6 +637,12 @@ def train(args: argparse.Namespace) -> None:
         raise FileNotFoundError(f"Tokenizer nicht gefunden: {args.tokenizer}")
     if not args.corpus.exists():
         raise FileNotFoundError(f"Korpus nicht gefunden: {args.corpus}")
+
+    if args.cooldown_from is not None:
+        if not args.cooldown_from.exists():
+            raise FileNotFoundError(f"Phase-1-Checkpoint nicht gefunden: {args.cooldown_from}")
+        if args.cooldown_corpus is None or not args.cooldown_corpus.exists():
+            raise FileNotFoundError(f"Cooldown-Korpus nicht gefunden: {args.cooldown_corpus}")
 
     sp = spm.SentencePieceProcessor(model_file=str(args.tokenizer))
     if not args.dry_run and sp.vocab_size() != config.VOCAB_SIZE:
@@ -608,16 +663,6 @@ def train(args: argparse.Namespace) -> None:
     val_cap = 2 if args.dry_run else 1_000
     train_cap = 8 if args.dry_run else 0
 
-    train_ds = DynamicPackedCorpusDataset(
-        corpus_path=args.corpus,
-        offsets=train_offsets,
-        sp_model_path=args.tokenizer,
-        block_size=args.block_size,
-        xbu_prob=args.xbu_prob,
-        is_eval=False,
-        base_seed=42,
-        max_blocks=train_cap,
-    )
     val_ds = DynamicPackedCorpusDataset(
         corpus_path=args.corpus,
         offsets=val_offsets,
@@ -628,27 +673,6 @@ def train(args: argparse.Namespace) -> None:
         base_seed=99,
         max_blocks=val_cap,
     )
-    print(
-        f"[✓] Dynamische Datasets: Train={len(train_offsets):,} Zeilen (~{len(train_ds):,} Blöcke/Epoche), "
-        f"Val={len(val_offsets):,} Zeilen ({len(val_ds):,} Blöcke)"
-    )
-
-    model_cfg = LlamaConfig(
-        vocab_size=sp.vocab_size(),
-        hidden_size=config.EMBEDDING_LENGTH,
-        intermediate_size=config.FEED_FORWARD_LENGTH,
-        num_hidden_layers=config.BLOCK_COUNT,
-        num_attention_heads=config.HEAD_COUNT,
-        num_key_value_heads=config.HEAD_COUNT_KV,
-        max_position_embeddings=config.CONTEXT_LENGTH,
-        rms_norm_eps=config.LAYER_NORM_RMS_EPSILON,
-        unk_token_id=config.UNK_TOKEN_ID,
-        bos_token_id=config.BOS_TOKEN_ID,
-        eos_token_id=config.EOS_TOKEN_ID,
-        pad_token_id=config.PAD_TOKEN_ID,
-        tie_word_embeddings=config.TIE_WORD_EMBEDDINGS,
-    )
-    model = LlamaForCausalLM(model_cfg)
 
     use_bf16 = has_cuda and torch.cuda.is_bf16_supported()
     use_fp16 = has_cuda and not use_bf16
@@ -658,67 +682,116 @@ def train(args: argparse.Namespace) -> None:
     prefetch_factor = 4 if num_workers > 0 else None
     collator = FutoDataCollator()
 
-    training_args = TrainingArguments(
-        output_dir=str(ckpt_dir),
-        num_train_epochs=1 if args.dry_run else args.epochs,
-        max_steps=2 if args.dry_run else -1,
-        per_device_train_batch_size=2 if args.dry_run else args.batch_size,
-        per_device_eval_batch_size=2 if args.dry_run else args.batch_size,
-        gradient_accumulation_steps=1 if args.dry_run else args.grad_accum,
-        learning_rate=args.lr,
-        optim=optim_name,
-        adam_beta1=0.9,
-        adam_beta2=0.95,
-        weight_decay=0.05,
-        lr_scheduler_type="cosine_with_min_lr",
-        lr_scheduler_kwargs={"min_lr_rate": 0.1},
-        warmup_steps=0 if args.dry_run else 0.05,
-        max_grad_norm=1.0,
-        logging_steps=1 if args.dry_run else 100,
-        eval_strategy="steps",
-        eval_steps=1 if args.dry_run else 1500,
-        save_strategy="steps",
-        save_steps=2 if args.dry_run else 1500,
-        save_total_limit=3,
-        load_best_model_at_end=True,
-        metric_for_best_model="eval_loss",
-        bf16=use_bf16,
-        bf16_full_eval=use_bf16,
-        fp16=use_fp16,
-        use_cpu=not has_cuda,
-        dataloader_num_workers=num_workers,
-        dataloader_persistent_workers=persistent_workers,
-        dataloader_prefetch_factor=prefetch_factor,
-        dataloader_pin_memory=has_cuda,
-        remove_unused_columns=False,
-        report_to="none",
-    )
+    if args.cooldown_from is not None:
+        print(f"Lade Phase-1-Checkpoint für Cooldown: {args.cooldown_from}")
+        model = LlamaForCausalLM.from_pretrained(str(args.cooldown_from))
+        main_steps = _read_checkpoint_steps(args.cooldown_from, fallback=13_000)
+        run_cooldown = True
+    else:
+        train_ds = DynamicPackedCorpusDataset(
+            corpus_path=args.corpus,
+            offsets=train_offsets,
+            sp_model_path=args.tokenizer,
+            block_size=args.block_size,
+            xbu_prob=args.xbu_prob,
+            is_eval=False,
+            base_seed=42,
+            max_blocks=train_cap,
+        )
+        print(
+            f"[✓] Dynamische Datasets: Train={len(train_offsets):,} Zeilen (~{len(train_ds):,} Blöcke/Epoche), "
+            f"Val={len(val_offsets):,} Zeilen ({len(val_ds):,} Blöcke)"
+        )
 
-    trainer = FutoTrainer(
-        model=model,
-        args=training_args,
-        train_dataset=train_ds,
-        eval_dataset=val_ds,
-        data_collator=collator,
-        callbacks=[EpochUpdateCallback(train_ds)],
-        char_a_id=aug_check.char_a_id,
-        char_mix_prob=args.char_mix_prob,
-    )
+        model_cfg = LlamaConfig(
+            vocab_size=sp.vocab_size(),
+            hidden_size=config.EMBEDDING_LENGTH,
+            intermediate_size=config.FEED_FORWARD_LENGTH,
+            num_hidden_layers=config.BLOCK_COUNT,
+            num_attention_heads=config.HEAD_COUNT,
+            num_key_value_heads=config.HEAD_COUNT_KV,
+            max_position_embeddings=config.CONTEXT_LENGTH,
+            rms_norm_eps=config.LAYER_NORM_RMS_EPSILON,
+            unk_token_id=config.UNK_TOKEN_ID,
+            bos_token_id=config.BOS_TOKEN_ID,
+            eos_token_id=config.EOS_TOKEN_ID,
+            pad_token_id=config.PAD_TOKEN_ID,
+            tie_word_embeddings=config.TIE_WORD_EMBEDDINGS,
+        )
+        model = LlamaForCausalLM(model_cfg)
 
-    print(f"Starte Phase 1 Training ({'DRY-RUN' if args.dry_run else 'FULL'})...")
-    trainer.train()
-    main_steps = max(1, int(trainer.state.max_steps or trainer.state.global_step or 1))
+        training_args = TrainingArguments(
+            output_dir=str(ckpt_dir),
+            num_train_epochs=1 if args.dry_run else args.epochs,
+            max_steps=2 if args.dry_run else -1,
+            per_device_train_batch_size=2 if args.dry_run else args.batch_size,
+            per_device_eval_batch_size=2 if args.dry_run else args.batch_size,
+            gradient_accumulation_steps=1 if args.dry_run else args.grad_accum,
+            learning_rate=args.lr,
+            optim=optim_name,
+            adam_beta1=0.9,
+            adam_beta2=0.95,
+            weight_decay=0.05,
+            lr_scheduler_type="cosine_with_min_lr",
+            lr_scheduler_kwargs={"min_lr_rate": 0.1},
+            warmup_steps=0 if args.dry_run else 0.05,
+            max_grad_norm=1.0,
+            logging_steps=1 if args.dry_run else 100,
+            eval_strategy="steps",
+            eval_steps=1 if args.dry_run else 1500,
+            save_strategy="steps",
+            save_steps=2 if args.dry_run else 1500,
+            save_total_limit=3,
+            load_best_model_at_end=True,
+            metric_for_best_model="eval_loss",
+            bf16=use_bf16,
+            bf16_full_eval=use_bf16,
+            fp16=use_fp16,
+            use_cpu=not has_cuda,
+            dataloader_num_workers=num_workers,
+            dataloader_persistent_workers=persistent_workers,
+            dataloader_prefetch_factor=prefetch_factor,
+            dataloader_pin_memory=has_cuda,
+            remove_unused_columns=False,
+            report_to="none",
+        )
+
+        trainer = FutoTrainer(
+            model=model,
+            args=training_args,
+            train_dataset=train_ds,
+            eval_dataset=val_ds,
+            data_collator=collator,
+            callbacks=[EpochUpdateCallback(train_ds), DivergenceGuardCallback()],
+            char_a_id=aug_check.char_a_id,
+            char_mix_prob=args.char_mix_prob,
+        )
+
+        print(f"Starte Phase 1 Training ({'DRY-RUN' if args.dry_run else 'FULL'})...")
+        trainer.train()
+        main_steps = max(1, int(trainer.state.max_steps or trainer.state.global_step or 1))
+        _save_final_artifacts(trainer, output_dir, args.tokenizer, label="Phase-1-Modell")
+        del trainer
+        if has_cuda:
+            torch.cuda.empty_cache()
+
+        run_cooldown = (
+            not args.no_cooldown
+            and args.cooldown_ratio > 0.0
+            and args.cooldown_corpus is not None
+            and args.cooldown_corpus.exists()
+        )
 
     # Optionale Phase 2: Cooldown auf Chat-/Alltagssätzen
-    if (
-        not args.no_cooldown
-        and args.cooldown_ratio > 0.0
-        and args.cooldown_corpus is not None
-        and args.cooldown_corpus.exists()
-    ):
+    if run_cooldown:
         cd_offsets = index_corpus_offsets(args.cooldown_corpus, max_lines=500 if args.dry_run else 0)
         if len(cd_offsets) >= 2:
-            cd_steps = 2 if args.dry_run else max(50, int(main_steps * args.cooldown_ratio))
+            if args.dry_run:
+                cd_steps = 2
+            elif args.cooldown_steps > 0:
+                cd_steps = args.cooldown_steps
+            else:
+                cd_steps = max(50, int(main_steps * args.cooldown_ratio))
             cd_ds = DynamicPackedCorpusDataset(
                 corpus_path=args.corpus,
                 offsets=train_offsets,
@@ -732,6 +805,8 @@ def train(args: argparse.Namespace) -> None:
                 secondary_offsets=cd_offsets,
                 secondary_prob=0.65,
             )
+            cd_eval_steps = 1 if args.dry_run else max(50, cd_steps // 2)
+            cd_save_steps = 2 if args.dry_run else max(250, cd_steps // 2)
             cd_args = TrainingArguments(
                 output_dir=str(ckpt_dir.parent / f"{ckpt_dir.name}_cooldown"),
                 max_steps=cd_steps,
@@ -749,8 +824,10 @@ def train(args: argparse.Namespace) -> None:
                 max_grad_norm=1.0,
                 logging_steps=1 if args.dry_run else 50,
                 eval_strategy="steps",
-                eval_steps=1 if args.dry_run else max(50, cd_steps // 2),
-                save_strategy="no",
+                eval_steps=cd_eval_steps,
+                save_strategy="steps",
+                save_steps=cd_save_steps,
+                save_total_limit=2,
                 bf16=use_bf16,
                 bf16_full_eval=use_bf16,
                 fp16=use_fp16,
@@ -768,7 +845,7 @@ def train(args: argparse.Namespace) -> None:
                 train_dataset=cd_ds,
                 eval_dataset=val_ds,
                 data_collator=collator,
-                callbacks=[EpochUpdateCallback(cd_ds)],
+                callbacks=[EpochUpdateCallback(cd_ds), DivergenceGuardCallback()],
                 char_a_id=aug_check.char_a_id,
                 char_mix_prob=args.char_mix_prob,
             )
@@ -777,11 +854,7 @@ def train(args: argparse.Namespace) -> None:
                 f"65% {args.cooldown_corpus.name})..."
             )
             cd_trainer.train()
-
-    output_dir.mkdir(parents=True, exist_ok=True)
-    trainer.save_model(str(output_dir))
-    shutil.copy2(args.tokenizer, output_dir / "tokenizer.model")
-    print(f"[✓] Training abgeschlossen! Modell & Tokenizer gespeichert in: {output_dir}")
+            _save_final_artifacts(cd_trainer, output_dir, args.tokenizer, label="Finales Cooldown-Modell")
 
 
 def main() -> None:
@@ -799,6 +872,8 @@ def main() -> None:
     parser.add_argument("--char-mix-prob", type=float, default=0.65)
     parser.add_argument("--cooldown-corpus", type=Path, default=config.COOLDOWN_CORPUS_PATH)
     parser.add_argument("--cooldown-ratio", type=float, default=0.10)
+    parser.add_argument("--cooldown-from", type=Path, default=None, help="Phase-1-Checkpoint laden und direkt Phase 2 Cooldown trainieren.")
+    parser.add_argument("--cooldown-steps", type=int, default=0, help="Explizite Step-Anzahl für Phase 2 (0 = automatisch aus Ratio).")
     parser.add_argument("--no-cooldown", action="store_true")
     parser.add_argument("--max-lines", type=int, default=0)
     parser.add_argument("--dry-run", action="store_true")

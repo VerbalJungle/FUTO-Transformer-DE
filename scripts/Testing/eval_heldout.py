@@ -22,10 +22,13 @@ WORD_RE = re.compile(r"\S+")
 ALPHA_WORD_RE = re.compile(r"^[A-Za-zÄÖÜäöüß]{2,}$")
 
 
-def load_heldout_records(path: Path, max_sentences: int) -> list[dict[str, str]]:
+def load_heldout_records(
+    path: Path, max_sentences: int, seed: int = 2026
+) -> list[dict[str, str]]:
+    """Lädt Held-out-Sätze stratifiziert (gleichmäßig über alle vorhandenen Quellen)."""
     if not path.exists():
         raise FileNotFoundError(f"Held-out-Datei nicht gefunden: {path}")
-    records: list[dict[str, str]] = []
+    by_source: dict[str, list[dict[str, str]]] = defaultdict(list)
     with path.open("r", encoding="utf-8") as f:
         for line in f:
             raw = line.strip()
@@ -39,9 +42,34 @@ def load_heldout_records(path: Path, max_sentences: int) -> list[dict[str, str]]
                 text = raw
                 source = "text"
             if text:
-                records.append({"source": source, "text": text})
-                if max_sentences > 0 and len(records) >= max_sentences:
+                by_source[source].append({"source": source, "text": text})
+
+    if not by_source:
+        return []
+
+    rng = random.Random(seed)
+    sources = sorted(by_source.keys())
+    for src in sources:
+        rng.shuffle(by_source[src])
+
+    total_available = sum(len(v) for v in by_source.values())
+    limit = total_available if max_sentences <= 0 else min(max_sentences, total_available)
+
+    # Round-Robin über alle Quellen, damit auch [:ksr_sentences] alle Domänen abdeckt
+    records: list[dict[str, str]] = []
+    idx_by_src = {src: 0 for src in sources}
+    while len(records) < limit:
+        added_any = False
+        for src in sources:
+            i = idx_by_src[src]
+            if i < len(by_source[src]):
+                records.append(by_source[src][i])
+                idx_by_src[src] = i + 1
+                added_any = True
+                if len(records) >= limit:
                     break
+        if not added_any:
+            break
     return records
 
 
@@ -274,8 +302,8 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Held-out Next-Word, KSR & XBU-Stress Benchmark.")
     parser.add_argument("model", nargs="?", type=Path, default=None, help="Pfad zu .gguf oder PyTorch-Ordner.")
     parser.add_argument("--input", type=Path, default=config.HELDOUT_PATH)
-    parser.add_argument("--max-sentences", type=int, default=200)
-    parser.add_argument("--ksr-sentences", type=int, default=100)
+    parser.add_argument("--max-sentences", type=int, default=210)
+    parser.add_argument("--ksr-sentences", type=int, default=70)
     parser.add_argument("--threads", type=int, default=4)
     parser.add_argument("--device", default="cpu")
     parser.add_argument("--seed", type=int, default=2026)
@@ -283,7 +311,7 @@ def main() -> None:
     args = parser.parse_args()
 
     model_path = args.model or resolve_default_model()
-    records = load_heldout_records(args.input, args.max_sentences)
+    records = load_heldout_records(args.input, args.max_sentences, seed=args.seed)
     if not records:
         raise SystemExit(f"Keine Sätze in {args.input} gefunden.")
 

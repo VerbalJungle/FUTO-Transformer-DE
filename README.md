@@ -13,9 +13,9 @@ Ein ultrakompaktes deutsches Sprachmodell (~40M Parameter, LLaMA-Architektur mit
 - **Deutsche Umlaute & Rechtschreibung:** Automatische Wiederherstellung von `ä`, `ö`, `ü`, `ß` sowie kontextabhängige Groß-/Kleinschreibung *(ohne Swipe-Typing / `xc0_swipe_typing_v1`)*.
 - **FUTO-kompatibler Tokenizer:** 15.008 Token SentencePiece-BPE-Vokabular mit `treat_whitespace_as_suffix`, Byte-Fallback, `split_digits` und den FUTO-Spezialtokens (`<XBU>`, `<XBC>`, `<XEC>`, `<CHAR_A>`–`<CHAR_Z>`).
 - **Quantisierte GGUF-Varianten:**
-  - `German-v1-q5km.gguf` (**~30 MB** – **Empfohlen** als Standard für die meisten Geräte)
-  - `German-v1-q80.gguf` (**~42 MB** – maximale Präzision und hohe Geschwindigkeit)
-  - `German-v1-q4km.gguf` (**~27 MB** – für Geräte mit sehr knappem Speicher)
+  - `German-v1.5-q5km.gguf` (**~30 MB** – **Empfohlen** als Standard für die meisten Geräte)
+  - `German-v1.5-q80.gguf` (**~42 MB** – maximale Präzision und hohe Geschwindigkeit)
+  - `German-v1.5-q4km.gguf` (**~27 MB** – für Geräte mit sehr knappem Speicher)
   - *(zum Vergleich: unquantisiert `F32` ~156 MB)*
 
 ---
@@ -23,7 +23,7 @@ Ein ultrakompaktes deutsches Sprachmodell (~40M Parameter, LLaMA-Architektur mit
 ## Nutzung
 
 **Welches Modell wählen?**  
-Für normale Nutzer empfiehlt sich **`German-v1-q5km.gguf`**. Wer genügend Speicher hat und maximale Genauigkeit möchte, greift zu **`German-v1-q80.gguf`**.
+Für normale Nutzer empfiehlt sich **`German-v1.5-q5km.gguf`**. Wer genügend Speicher hat und maximale Genauigkeit möchte, greift zu **`German-v1.5-q80.gguf`**.
 
 **In-App-Installation (FUTO Keyboard):**
 1. Öffne die **FUTO Keyboard**-App.
@@ -46,13 +46,16 @@ source venv/bin/activate
 
 ### 2. Pipeline ausführen
 ```bash
-# 1. Korpus bauen (~85 % FragReddit + ~15 % Wikipedia 2021 -> DataSet/corpus_de_v2.txt)
+# 0. Freie Quellen herunterladen (Tatoeba, OpenSubtitles DE, Leipzig News, FineWeb-2 DE)
+python scripts/download_datasets.py
+
+# 1. Multi-Source-Korpus bauen -> DataSet/corpus_de_v1_5.txt (+ Cooldown & Held-out-Split)
 python scripts/build_corpus.py
 
 # 2. FUTO-kompatiblen SentencePiece-Tokenizer trainieren & validieren
 python scripts/train_tokenizer.py
 
-# 3. Modell trainieren (Sequence Packing + <XBU>-Augmentierung + Eval-Split)
+# 3. Modell trainieren (dynamische <XBU>-Augmentierung + 2D-Soft-Mixing + 4D-Maske + Cooldown)
 #    Hinweis: benötigt GPU (ROCm/CUDA); für einen schnellen Testlauf --dry-run nutzen
 python scripts/train_model.py
 
@@ -64,13 +67,16 @@ python scripts/quantize_model.py
 ```
 
 ### 3. Benchmark (optional)
-`Benchmark.py` testet Next-Word-Prediction und `<XBU>`-Autokorrektur direkt über `llama.cpp` (`libllama.so`) oder reines PyTorch (ohne `llama-cpp-python`):
+`Benchmark.py` und `eval_heldout.py` testen Next-Word-Prediction, `<XBU>`-Autokorrektur und Keystroke Savings Rate (KSR) direkt über `llama.cpp` (`libllama.so`) oder reines PyTorch (ohne `llama-cpp-python`):
 ```bash
-# Standard: testet Models/transformer_de_DE_q80.gguf
+# Standard: testet Models/German-v1.5-q5km.gguf auf 165 kuratierten Fällen
 python scripts/Testing/Benchmark.py
 
 # Alle GGUFs in Models/ + PyTorch-Referenz (futo_de_final/) vergleichen
 python scripts/Testing/Benchmark.py --all --include-pt --summary-only
+
+# 7-Domänen Held-out- & KSR-Benchmark (210 Sätze, 70 KSR-Sätze)
+python scripts/Testing/eval_heldout.py Models/German-v1.5-q5km.gguf
 ```
 
 ---
@@ -88,8 +94,8 @@ futo-keyboard-german/
 │   └── DATASETS.md               # Formale Übersicht der Datenquellen, Lizenzen & Links
 ├── DataSet/                      # Rohdaten & generierter Korpus
 ├── tokenizer/
-│   ├── futo_de_15k_v2.model      # Aktiver FUTO-SentencePiece-Tokenizer
-│   └── futo_de_15k_v2.vocab
+│   ├── futo_de_15k_v1_5.model    # Aktiver FUTO-SentencePiece-Tokenizer
+│   └── futo_de_15k_v1_5.vocab
 ├── scripts/
 │   ├── download_datasets.py      # Download-Helper (Tatoeba, OpenSubtitles, Leipzig, FineWeb-2)
 │   ├── build_corpus.py           # Korpus-Bereinigung, Filterung & Multi-Source-Mix
